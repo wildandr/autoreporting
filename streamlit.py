@@ -197,5 +197,6 @@ def generate_report():
             st.success(f'Report berhasil dibuat! Klik link di atas untuk mengunduh.')
 
 
+
 if __name__ == "__main__":
     generate_report()
