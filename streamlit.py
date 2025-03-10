@@ -8,6 +8,8 @@ import requests
 import io
 import base64
 import os
+import subprocess
+import tempfile
 
 # Set page title
 st.set_page_config(page_title="Daily Report Generator", layout="wide")
@@ -71,6 +73,18 @@ def create_download_link(docx_file, filename):
     # Encode untuk download link
     b64 = base64.b64encode(doc_io.read()).decode()
     return f'<a href="data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,{b64}" download="{filename}">Download {filename}</a>'
+
+# Fungsi untuk mengubah dokumen Word menjadi file PDF yang dapat diunduh
+def convert_docx_to_pdf(docx_file):
+    # Untuk deployment di Streamlit Cloud, konversi PDF dengan LibreOffice tidak tersedia
+    # Jadi hanya menyediakan file DOCX
+    st.warning("Konversi ke PDF tidak tersedia di server. Hanya file DOCX yang dapat diunduh.")
+    return None
+
+# Fungsi untuk membuat link download PDF
+def create_pdf_download_link(pdf_data, filename):
+    b64 = base64.b64encode(pdf_data).decode()
+    return f'<a href="data:application/pdf;base64,{b64}" download="{filename}">Download {filename}</a>'
 
 # Main function untuk streamlit
 def generate_report():
@@ -212,11 +226,10 @@ def generate_report():
             # Tambahkan Keterangan setelah tabel
             doc.add_paragraph(f"Catatan: {keterangan}")
 
-            # Buat download link
+            # Buat download link untuk DOCX
             download_html = create_download_link(doc, file_name)
             st.markdown(download_html, unsafe_allow_html=True)
-            st.success(f'Report berhasil dibuat! Klik link di atas untuk mengunduh.')
-
+            st.success(f'Report berhasil dibuat! Klik link di atas untuk mengunduh file DOCX.')
 
 if __name__ == "__main__":
     generate_report()
