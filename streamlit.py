@@ -173,6 +173,7 @@ def generate_report():
                 tr = table.rows[1]._tr
                 table._tbl.remove(tr)
                 
+                
             # Tambahkan data baru ke tabel yang ada
             for no, pekerjaan, batas_waktu, status, selesai_pada in data_baru:
                 row_cells = table.add_row().cells
