@@ -41,14 +41,20 @@ def add_black_borders(cell):
 def format_tanggal(tanggal_str, bulan_dict):
     if isinstance(tanggal_str, str) and tanggal_str.strip():
         try:
+            # Check for "NaT" string or empty string
+            if tanggal_str == "NaT" or tanggal_str == "":
+                return ""
+                
             dt = datetime.strptime(tanggal_str.split()[0], "%Y-%m-%d")
             hari = dt.strftime("%d")
             bulan = bulan_dict[dt.strftime("%B")]
             tahun = dt.strftime("%Y")
             return f"{hari} {bulan} {tahun}"
         except ValueError:
-            return tanggal_str  # Kembalikan asli jika format tidak sesuai
-    return tanggal_str  # Kembalikan asli jika kosong atau bukan string
+            # Return empty string for invalid dates
+            return ""
+    # Return empty string for None or empty
+    return ""
 
 # Dictionary untuk hari dan bulan dalam bahasa Indonesia
 hari = {
@@ -119,9 +125,9 @@ def generate_report():
             data_baru = [
                 (
                     idx + 1,  # Override nomor urut agar dimulai dari 1
-                    row['Pekerjaan'],
+                    row['Pekerjaan'] if not pd.isna(row['Pekerjaan']) else "",
                     format_tanggal(str(row['Batas Waktu']), bulan),
-                    row['Status'],
+                    row['Status'] if not pd.isna(row['Status']) else "",
                     format_tanggal(str(row['Diselesaikan Pada']), bulan)
                 )
                 for idx, (_, row) in enumerate(df_filtered.iterrows())
@@ -153,64 +159,36 @@ def generate_report():
             
             for para in paragraphs_to_remove:
                 doc.element.body.remove(para._element)
-
-            # Temukan tabel lama
+                
+            # PENDEKATAN BARU: Kita tidak menghapus tabel lama, tapi menggantinya dengan data baru
             if not doc.tables:
                 st.error("Tidak dapat menemukan tabel di template dokumen.")
                 return
                 
-            old_table = doc.tables[0]
-            table_style = old_table.style  # Simpan gaya tabel
-            header_row = [cell.text for cell in old_table.rows[0].cells]  # Simpan header
-
-            # Temukan posisi tabel lama dalam dokumen
-            table_index = None
-            for i, element in enumerate(doc.element.body):
-                if old_table._tbl in element:
-                    table_index = i
-                    break
-
-            # Jika tabel tidak ditemukan, tambahkan di akhir dokumen
-            if table_index is None:
-                st.warning("Tabel tidak ditemukan dalam dokumen. Menambahkan tabel baru di akhir.")
-                table_index = len(doc.element.body)
-
-            # Hapus tabel lama dari dokumen
-            doc.element.body.remove(old_table._tbl)
-
-            # Tambahkan tabel baru di posisi yang sama
-            new_table = doc.add_table(rows=1, cols=len(header_row), style=table_style)
-            new_table.autofit = True
-            doc.element.body.insert(table_index, new_table._tbl)
-
-            # Tambahkan header ke tabel baru, salin pemformatan warna, dan tambahkan garis hitam
-            hdr_cells = new_table.rows[0].cells
-            for i, header_text in enumerate(header_row):
-                hdr_cells[i].text = header_text
-                copy_cell_formatting(old_table.rows[0].cells[i], hdr_cells[i])  # Salin warna
-                add_black_borders(hdr_cells[i])  # Tambahkan garis hitam
-
-            # Tambahkan data baru ke tabel, salin pemformatan warna, dan tambahkan garis hitam
-            for j, (no, pekerjaan, batas_waktu, status, selesai_pada) in enumerate(data_baru):
-                row_cells = new_table.add_row().cells
+            table = doc.tables[0]  # Gunakan tabel yang ada
+            
+            # Pertahankan baris header, hapus semua baris data (baris ke-2 dan seterusnya)
+            # Ini mempertahankan semua format dan style
+            while len(table.rows) > 1:
+                tr = table.rows[1]._tr
+                table._tbl.remove(tr)
+                
+            # Tambahkan data baru ke tabel yang ada
+            for no, pekerjaan, batas_waktu, status, selesai_pada in data_baru:
+                row_cells = table.add_row().cells
                 row_cells[0].text = str(no)
                 row_cells[1].text = pekerjaan
                 row_cells[2].text = batas_waktu
                 row_cells[3].text = status
                 row_cells[4].text = selesai_pada
-                # Salin pemformatan dari baris data pertama tabel lama (jika ada)
-                if len(old_table.rows) > 1:
-                    old_row = old_table.rows[1].cells  # Ambil baris data pertama dari tabel lama
-                    for i in range(len(row_cells)):
-                        copy_cell_formatting(old_row[i], row_cells[i])  # Salin warna
-                        add_black_borders(row_cells[i])  # Tambahkan garis hitam
-                else:
-                    # Jika tidak ada baris data lama, tetap tambahkan garis hitam
-                    for i in range(len(row_cells)):
-                        add_black_borders(row_cells[i])
+                
+                # Tambahkan garis hitam saja, tidak perlu menyalin format warna
+                # karena kita menggunakan tabel asli yang sudah memiliki format
+                for i in range(len(row_cells)):
+                    add_black_borders(row_cells[i])
 
             # Tambahkan Keterangan setelah tabel
-            doc.add_paragraph(f"Catatan: {keterangan}")
+            doc.add_paragraph(f"{keterangan}")
 
             # Buat download link
             download_html = create_download_link(doc, file_name)
