@@ -118,13 +118,13 @@ def generate_report():
             # Konversi data filtered ke format yang sesuai untuk tabel
             data_baru = [
                 (
-                    row['No'],
+                    idx + 1,  # Override nomor urut agar dimulai dari 1
                     row['Pekerjaan'],
                     format_tanggal(str(row['Batas Waktu']), bulan),
                     row['Status'],
                     format_tanggal(str(row['Diselesaikan Pada']), bulan)
                 )
-                for _, row in df_filtered.iterrows()
+                for idx, (_, row) in enumerate(df_filtered.iterrows())
             ]
 
             # Ambil semua keterangan dari data yang difilter dan gabungkan
