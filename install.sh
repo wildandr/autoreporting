@@ -1,20 +1,20 @@
 #!/bin/bash
 
 # Script instalasi otomatis untuk Daily Report Generator
-# Usage: sudo bash install.sh [username] [port]
+# Usage: bash install.sh [username] [port]
 
 set -e
 
-# Verifikasi user yang menjalankan adalah root
-if [ "$EUID" -ne 0 ]; then
-  echo "Script ini membutuhkan akses root. Silakan jalankan dengan sudo."
-  exit 1
-fi
+echo "Current user: $(whoami)"
+echo "User ID: $(id)"
 
-# Gunakan parameter username jika disediakan, jika tidak gunakan sudoer user
+# Gunakan parameter username jika disediakan, jika tidak gunakan root jika sudah sebagai root
 if [ -z "$1" ]; then
-  # Ambil user yang menjalankan sudo
-  USERNAME=$(logname || echo ${SUDO_USER})
+  if [ "$(whoami)" = "root" ]; then
+    USERNAME="root"
+  else
+    USERNAME=$(whoami)
+  fi
 else
   USERNAME=$1
 fi
@@ -28,7 +28,7 @@ fi
 
 # Pastikan username valid
 if ! id "$USERNAME" &>/dev/null; then
-  echo "User $USERNAME tidak ditemukan. Silakan berikan username yang valid."
+  echo "Error: User $USERNAME tidak ditemukan. Silakan berikan username yang valid."
   exit 1
 fi
 
@@ -42,8 +42,14 @@ echo "App directory: $APP_DIR"
 echo "Port: $PORT"
 
 echo -e "\n[1/7] Update sistem dan install dependencies..."
-apt update
-apt install -y python3 python3-pip python3-venv libreoffice
+# Cek apakah perlu sudo
+if [ "$(whoami)" != "root" ]; then
+  sudo apt update
+  sudo apt install -y python3 python3-pip python3-venv libreoffice
+else
+  apt update
+  apt install -y python3 python3-pip python3-venv libreoffice
+fi
 
 echo -e "\n[2/7] Membuat direktori aplikasi..."
 mkdir -p $APP_DIR
@@ -55,17 +61,31 @@ else
 fi
 
 echo -e "\n[3/7] Mengatur kepemilikan direktori..."
-chown -R $USERNAME:$USERNAME $APP_DIR
+if [ "$(whoami)" != "root" ]; then
+  sudo chown -R $USERNAME:$USERNAME $APP_DIR
+else
+  chown -R $USERNAME:$USERNAME $APP_DIR
+fi
 
 echo -e "\n[4/7] Membuat virtual environment..."
-su - $USERNAME -c "cd $APP_DIR && python3 -m venv venv"
+if [ "$USERNAME" = "$(whoami)" ]; then
+  cd $APP_DIR && python3 -m venv venv
+else
+  su - $USERNAME -c "cd $APP_DIR && python3 -m venv venv"
+fi
 
 echo -e "\n[5/7] Menginstal library yang diperlukan..."
-su - $USERNAME -c "cd $APP_DIR && source venv/bin/activate && pip install streamlit python-docx pandas requests"
+if [ "$USERNAME" = "$(whoami)" ]; then
+  cd $APP_DIR && source venv/bin/activate && pip install streamlit python-docx pandas requests
+else
+  su - $USERNAME -c "cd $APP_DIR && source venv/bin/activate && pip install streamlit python-docx pandas requests"
+fi
 
 echo -e "\n[6/7] Membuat service systemd..."
-cat > /etc/systemd/system/daily-report.service << EOF
-[Unit]
+SERVICE_FILE="/etc/systemd/system/daily-report.service"
+
+# Buat konten service
+SERVICE_CONTENT="[Unit]
 Description=Daily Report Streamlit App
 After=network.target
 
@@ -77,18 +97,34 @@ Restart=always
 RestartSec=5
 
 [Install]
-WantedBy=multi-user.target
-EOF
+WantedBy=multi-user.target"
+
+# Tulis ke file service
+if [ "$(whoami)" != "root" ]; then
+  echo "$SERVICE_CONTENT" | sudo tee $SERVICE_FILE > /dev/null
+else
+  echo "$SERVICE_CONTENT" > $SERVICE_FILE
+fi
 
 echo -e "\n[7/7] Mengaktifkan dan memulai service..."
-systemctl daemon-reload
-systemctl enable daily-report
-systemctl start daily-report
+if [ "$(whoami)" != "root" ]; then
+  sudo systemctl daemon-reload
+  sudo systemctl enable daily-report
+  sudo systemctl start daily-report
+else
+  systemctl daemon-reload
+  systemctl enable daily-report
+  systemctl start daily-report
+fi
 
 # Cek status firewall
 if command -v ufw &>/dev/null && ufw status | grep -q "active"; then
   echo -e "\nMembuka port $PORT di firewall UFW..."
-  ufw allow $PORT/tcp
+  if [ "$(whoami)" != "root" ]; then
+    sudo ufw allow $PORT/tcp
+  else
+    ufw allow $PORT/tcp
+  fi
 fi
 
 # Ambil alamat IP server
