@@ -1,7 +1,7 @@
 streamlit
 flask==2.3.3
 python-docx==0.8.11
-pandas==2.0.3
+pandas
 requests==2.31.0
 openpyxl
 gunicorn==21.2.0
