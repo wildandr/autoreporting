@@ -8,33 +8,6 @@ import requests
 import io
 import base64
 import os
-import subprocess
-import tempfile
-import socket
-
-# Tambahkan informasi diagnostik dan status server
-try:
-    hostname = socket.gethostname()
-    ip_address = socket.gethostbyname(hostname)
-    
-    # Tambahkan sidebar dengan informasi server
-    st.sidebar.title("Informasi Server")
-    st.sidebar.success(f"Server: {hostname}")
-    st.sidebar.info(f"IP: {ip_address}")
-    
-    # Cek Nginx status
-    nginx_status = "Aktif" if subprocess.run(["systemctl", "is-active", "nginx"], 
-                                           capture_output=True, text=True).stdout.strip() == "active" else "Tidak Aktif"
-    st.sidebar.info(f"Nginx: {nginx_status}")
-    
-    # Cek template dokumen
-    template_path = "Weekly Daily Report Wildan Dzaky Ramadhani.docx"
-    if os.path.exists(template_path):
-        st.sidebar.success(f"✓ Template dokumen ditemukan")
-    else:
-        st.sidebar.error(f"✗ Template dokumen tidak ditemukan: {template_path}")
-except Exception as e:
-    pass  # Abaikan error diagnostik karena tidak krusial untuk aplikasi
 
 # Set page title
 st.set_page_config(page_title="Daily Report Generator", layout="wide")
@@ -105,56 +78,6 @@ def create_download_link(docx_file, filename):
     b64 = base64.b64encode(doc_io.read()).decode()
     return f'<a href="data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,{b64}" download="{filename}">Download {filename}</a>'
 
-# Fungsi untuk mengubah dokumen Word menjadi PDF menggunakan LibreOffice
-def convert_docx_to_pdf(docx_file):
-    try:
-        st.info("Mengkonversi dokumen ke PDF menggunakan LibreOffice...")
-        
-        # Simpan dokumen ke file sementara
-        with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as temp_docx:
-            docx_file.save(temp_docx.name)
-            temp_docx_path = temp_docx.name
-        
-        # Nama file PDF sementara
-        temp_pdf_path = temp_docx_path.replace('.docx', '.pdf')
-        
-        # Konversi dengan LibreOffice
-        subprocess.run([
-            'libreoffice', '--headless', '--convert-to', 'pdf', 
-            '--outdir', os.path.dirname(temp_pdf_path), temp_docx_path
-        ], check=True, timeout=30)
-        
-        # Baca file PDF yang dihasilkan
-        with open(temp_pdf_path, 'rb') as pdf_file:
-            pdf_data = pdf_file.read()
-        
-        # Hapus file sementara
-        os.unlink(temp_docx_path)
-        os.unlink(temp_pdf_path)
-        
-        return pdf_data
-    except Exception as e:
-        st.error(f"Konversi PDF gagal: {str(e)}")
-        
-        # Pastikan file sementara dihapus
-        if 'temp_docx_path' in locals() and os.path.exists(temp_docx_path):
-            try:
-                os.unlink(temp_docx_path)
-            except:
-                pass
-        if 'temp_pdf_path' in locals() and os.path.exists(temp_pdf_path):
-            try:
-                os.unlink(temp_pdf_path)
-            except:
-                pass
-                
-        return None
-
-# Fungsi untuk membuat link download PDF
-def create_pdf_download_link(pdf_data, filename):
-    b64 = base64.b64encode(pdf_data).decode()
-    return f'<a href="data:application/pdf;base64,{b64}" download="{filename}">Download {filename}</a>'
-
 # Main function untuk streamlit
 def generate_report():
     # Ambil tanggal saat ini
@@ -171,9 +94,6 @@ def generate_report():
     # Tanggal filter (untuk default gunakan tanggal saat ini)
     filter_date = st.date_input("Pilih tanggal untuk laporan:", sekarang)
     filter_tanggal = filter_date.strftime("%Y-%m-%d")
-    
-    # Tampilkan informasi Google Sheets yang digunakan
-    st.info("Data akan diambil dari Google Sheets. Pastikan Anda terhubung ke internet.")
     
     if st.button("Generate Report"):
         with st.spinner('Generating report...'):
@@ -271,86 +191,12 @@ def generate_report():
             # Tambahkan Keterangan setelah tabel
             doc.add_paragraph(f"{keterangan}")
 
-            # Buat download link untuk DOCX
+            # Buat download link
             download_html = create_download_link(doc, file_name)
             st.markdown(download_html, unsafe_allow_html=True)
-            
-            # Konversi ke PDF jika diminta
-            if st.checkbox("Buat juga versi PDF"):
-                with st.spinner("Mengkonversi ke PDF..."):
-                    pdf_data = convert_docx_to_pdf(doc)
-                    if pdf_data:
-                        pdf_file_name = file_name.replace('.docx', '.pdf')
-                        pdf_download_html = create_pdf_download_link(pdf_data, pdf_file_name)
-                        st.markdown(pdf_download_html, unsafe_allow_html=True)
-                        st.success(f'Report berhasil dibuat dalam format DOCX dan PDF! Klik link di atas untuk mengunduh.')
-                    else:
-                        st.warning("Konversi PDF gagal. Hanya file DOCX yang tersedia.")
-                        st.success(f'Report berhasil dibuat! Klik link di atas untuk mengunduh file DOCX.')
-            else:
-                st.success(f'Report berhasil dibuat! Klik link di atas untuk mengunduh.')
+            st.success(f'Report berhasil dibuat! Klik link di atas untuk mengunduh.')
+
+
 
 if __name__ == "__main__":
     generate_report()
-
-# -------------------------------------------------------------------------------------------
-# PANDUAN INSTALASI DAN MENJALANKAN APLIKASI DI LINUX UBUNTU
-# -------------------------------------------------------------------------------------------
-# Jalankan perintah berikut di terminal Ubuntu untuk instalasi:
-#
-# 1. Update sistem dan instal dependencies
-# sudo apt update
-# sudo apt install -y python3 python3-pip python3-venv libreoffice
-#
-# 2. Buat direktori untuk aplikasi
-# mkdir -p ~/daily_report_app
-#
-# 3. Pindahkan file ini ke direktori aplikasi
-# cp streamlit.py ~/daily_report_app/
-# cp "Weekly Daily Report Wildan Dzaky Ramadhani.docx" ~/daily_report_app/
-#
-# 4. Buat dan aktifkan virtual environment
-# cd ~/daily_report_app
-# python3 -m venv venv
-# source venv/bin/activate
-#
-# 5. Instal library yang diperlukan
-# pip install streamlit python-docx pandas requests
-#
-# 6. Jalankan aplikasi agar bisa diakses melalui IP:
-# streamlit run streamlit.py --server.address=0.0.0.0 --server.port=8501
-#
-# 7. Akses aplikasi dari browser:
-# http://<IP-SERVER>:8501
-#
-# Catatan: Ganti <IP-SERVER> dengan IP komputer/server Ubuntu Anda.
-# Jika menggunakan UFW firewall, buka port dengan: sudo ufw allow 8501/tcp
-# 
-# Untuk menjalankan aplikasi sebagai layanan yang tetap berjalan:
-# 1. Buat file service systemd:
-#    sudo nano /etc/systemd/system/daily-report.service
-#
-# 2. Isi dengan konfigurasi berikut:
-#    [Unit]
-#    Description=Daily Report Streamlit App
-#    After=network.target
-#    
-#    [Service]
-#    User=<username>
-#    WorkingDirectory=/home/<username>/daily_report_app
-#    ExecStart=/home/<username>/daily_report_app/venv/bin/streamlit run streamlit.py --server.address=0.0.0.0 --server.port=8501
-#    Restart=always
-#    RestartSec=5
-#    
-#    [Install]
-#    WantedBy=multi-user.target
-#
-# 3. Ganti <username> dengan nama pengguna Anda
-#
-# 4. Aktifkan dan jalankan service:
-#    sudo systemctl daemon-reload
-#    sudo systemctl enable daily-report
-#    sudo systemctl start daily-report
-#
-# 5. Cek status service:
-#    sudo systemctl status daily-report
