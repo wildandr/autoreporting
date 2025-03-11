@@ -200,7 +200,7 @@ def generate_docx_report(filter_date):
 
     # Ambil semua keterangan dari data yang difilter dan gabungkan
     keterangan_list = [str(row['Keterangan']).strip() for _, row in df_filtered.iterrows() if str(row['Keterangan']).strip()]
-    keterangan = "\n".join(keterangan_list) if keterangan_list else "Tidak ada keterangan untuk hari ini."
+    keterangan = "\n".join(keterangan_list) if keterangan_list else "-"
 
     # Cek apakah template dokumen ada
     template_path = "Weekly Daily Report Wildan Dzaky Ramadhani.docx"
