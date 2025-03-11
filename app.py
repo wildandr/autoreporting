@@ -15,13 +15,13 @@ import tempfile
 import subprocess
 import traceback
 
-# Configure logging
+# Configure logging - Console only to avoid feedback loops
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('app.log')
+        logging.StreamHandler(sys.stdout)
+        # Removed FileHandler to avoid watchdog feedback loops
     ]
 )
 logger = logging.getLogger(__name__)
@@ -308,102 +308,51 @@ def convert_to_pdf(docx_content, base_filename):
     """
     logger.info("Starting PDF conversion")
     
-    # Create temporary files
-    with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as temp_docx:
-        temp_docx.write(docx_content)
-        temp_docx_path = temp_docx.name
+    # Create temporary files with unique names to avoid conflicts
+    temp_dir = tempfile.mkdtemp()
+    temp_docx_path = os.path.join(temp_dir, f"{base_filename}.docx")
+    
+    with open(temp_docx_path, 'wb') as f:
+        f.write(docx_content)
     
     logger.info(f"Created temporary DOCX file: {temp_docx_path}")
     
-    # Output PDF path
-    output_dir = os.path.dirname(temp_docx_path)
-    output_filename = os.path.basename(temp_docx_path).replace('.docx', '.pdf')
-    temp_pdf_path = os.path.join(output_dir, output_filename)
-    
-    logger.info(f"Target PDF path: {temp_pdf_path}")
+    # Define output PDF path
+    temp_pdf_path = os.path.join(temp_dir, f"{base_filename}.pdf")
     
     try:
         # Set environment variables for LibreOffice
         env = os.environ.copy()
         if 'HOME' not in env:
-            # LibreOffice may need HOME set
-            env['HOME'] = '/root'  
+            env['HOME'] = '/root'
         
-        # Try using absolute path to LibreOffice
-        libreoffice_paths = [
-            'libreoffice',
-            '/usr/bin/libreoffice',
-            '/usr/local/bin/libreoffice'
-        ]
+        # Use absolute path to LibreOffice
+        libreoffice_path = '/usr/bin/libreoffice'
         
-        success = False
-        error_messages = []
+        logger.info(f"Running LibreOffice conversion: {temp_docx_path} -> {temp_pdf_path}")
         
-        for libreoffice_path in libreoffice_paths:
-            try:
-                logger.info(f"Attempting conversion with: {libreoffice_path}")
-                
-                cmd = [
-                    libreoffice_path, 
-                    '--headless', 
-                    '--convert-to', 
-                    'pdf', 
-                    '--outdir', 
-                    output_dir,
-                    temp_docx_path
-                ]
-                
-                # Run with extended timeout and capture output
-                process = subprocess.run(
-                    cmd,
-                    env=env,
-                    capture_output=True,
-                    text=True,
-                    timeout=120  # 2 minutes timeout
-                )
-                
-                # Log the command output even if successful
-                logger.info(f"Command output: {process.stdout}")
-                if process.stderr:
-                    logger.info(f"Command stderr: {process.stderr}")
-                
-                # Check if the PDF was actually created
-                if os.path.exists(temp_pdf_path):
-                    logger.info(f"PDF conversion successful with: {libreoffice_path}")
-                    success = True
-                    break
-                else:
-                    error_msg = f"PDF file not created despite process exit code 0 with {libreoffice_path}"
-                    logger.warning(error_msg)
-                    error_messages.append(error_msg)
-                    
-            except subprocess.TimeoutExpired as e:
-                error_msg = f"Conversion timed out with {libreoffice_path}: {str(e)}"
-                logger.error(error_msg)
-                error_messages.append(error_msg)
-                continue
-                
-            except subprocess.CalledProcessError as e:
-                error_msg = f"Conversion failed with {libreoffice_path}: Exit code {e.returncode}"
-                if e.stdout:
-                    error_msg += f"\nSTDOUT: {e.stdout}"
-                if e.stderr:
-                    error_msg += f"\nSTDERR: {e.stderr}"
-                logger.error(error_msg)
-                error_messages.append(error_msg)
-                continue
-                
-            except Exception as e:
-                error_msg = f"Unexpected error with {libreoffice_path}: {str(e)}"
-                logger.error(error_msg)
-                logger.error(traceback.format_exc())
-                error_messages.append(error_msg)
-                continue
+        # Execute the command with detailed output capture
+        process = subprocess.run(
+            [
+                libreoffice_path,
+                '--headless',
+                '--convert-to', 'pdf',
+                '--outdir', temp_dir,
+                temp_docx_path
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=180  # 3 minutes timeout
+        )
         
-        if not success:
-            # All conversion attempts failed
-            error_detail = "\n".join(error_messages)
-            raise Exception(f"All PDF conversion attempts failed: {error_detail}")
+        logger.info(f"Command output: {process.stdout}")
+        if process.stderr:
+            logger.info(f"Command stderr: {process.stderr}")
+        
+        # Verify the PDF was created
+        if not os.path.exists(temp_pdf_path):
+            raise Exception("PDF file was not created after conversion")
         
         # Read the PDF content
         with open(temp_pdf_path, 'rb') as f:
@@ -412,50 +361,53 @@ def convert_to_pdf(docx_content, base_filename):
         
         return pdf_content
         
+    except subprocess.TimeoutExpired:
+        logger.error("LibreOffice conversion timed out")
+        raise Exception("PDF conversion timed out. Try downloading as DOCX instead.")
+        
+    except subprocess.CalledProcessError as e:
+        logger.error(f"LibreOffice conversion failed with exit code {e.returncode}")
+        logger.error(f"STDOUT: {e.stdout}")
+        logger.error(f"STDERR: {e.stderr}")
+        raise Exception(f"PDF conversion failed with exit code {e.returncode}. Try downloading as DOCX instead.")
+        
     except Exception as e:
         logger.error(f"PDF conversion failed: {str(e)}")
         logger.error(traceback.format_exc())
         raise
+        
     finally:
         # Clean up temporary files
-        logger.info("Cleaning up temporary files")
         try:
-            if os.path.exists(temp_docx_path):
-                os.unlink(temp_docx_path)
-            if os.path.exists(temp_pdf_path):
-                os.unlink(temp_pdf_path)
+            import shutil
+            shutil.rmtree(temp_dir)
+            logger.info(f"Cleaned up temporary directory: {temp_dir}")
         except Exception as e:
             logger.warning(f"Error cleaning up temporary files: {str(e)}")
 
 @app.route('/status')
 def status():
     """Simple status endpoint to check if app is running"""
+    libreoffice_info = check_libreoffice_availability()
     return jsonify({
         "status": "running",
         "template_exists": os.path.exists("Weekly Daily Report Wildan Dzaky Ramadhani.docx"),
         "templates_dir_exists": os.path.exists("templates"),
         "index_html_exists": os.path.exists("templates/index.html"),
-        "libreoffice_found": check_libreoffice_availability()
+        "libreoffice": libreoffice_info
     })
 
 def check_libreoffice_availability():
     """Check if LibreOffice is available and working"""
-    libreoffice_paths = [
-        'libreoffice',
-        '/usr/bin/libreoffice',
-        '/usr/local/bin/libreoffice'
-    ]
-    
-    for path in libreoffice_paths:
-        try:
-            result = subprocess.run([path, '--version'], 
-                                   capture_output=True, 
-                                   text=True, 
-                                   timeout=10)
-            if result.returncode == 0:
-                return {"available": True, "path": path, "version": result.stdout.strip()}
-        except:
-            pass
+    try:
+        result = subprocess.run(['/usr/bin/libreoffice', '--version'], 
+                               capture_output=True, 
+                               text=True, 
+                               timeout=10)
+        if result.returncode == 0:
+            return {"available": True, "path": "/usr/bin/libreoffice", "version": result.stdout.strip()}
+    except Exception as e:
+        return {"available": False, "error": str(e)}
     
     return {"available": False}
 
