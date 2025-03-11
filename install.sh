@@ -84,7 +84,7 @@ fi
 echo -e "\n[6/7] Membuat service systemd..."
 SERVICE_FILE="/etc/systemd/system/daily-report.service"
 
-# Buat konten service
+# Buat konten service dengan pengaturan tambahan untuk akses jaringan
 SERVICE_CONTENT="[Unit]
 Description=Daily Report Streamlit App
 After=network.target
@@ -92,9 +92,10 @@ After=network.target
 [Service]
 User=$USERNAME
 WorkingDirectory=$APP_DIR
-ExecStart=$APP_DIR/venv/bin/streamlit run streamlit.py --server.address=0.0.0.0 --server.port=$PORT
+ExecStart=$APP_DIR/venv/bin/streamlit run streamlit.py --server.address=0.0.0.0 --server.port=$PORT --server.headless=true --server.enableCORS=false --server.enableXsrfProtection=false
 Restart=always
 RestartSec=5
+Environment=\"PYTHONUNBUFFERED=1\"
 
 [Install]
 WantedBy=multi-user.target"
@@ -117,6 +118,28 @@ else
   systemctl start daily-report
 fi
 
+# Membuat konfigurasi Streamlit khusus
+mkdir -p "$APP_DIR/.streamlit"
+cat > "$APP_DIR/.streamlit/config.toml" << EOL
+[server]
+port = $PORT
+address = "0.0.0.0"
+headless = true
+enableCORS = false
+enableXsrfProtection = false
+
+[browser]
+serverAddress = "localhost"
+gatherUsageStats = false
+EOL
+
+# Pastikan kepemilikan file konfigurasi
+if [ "$(whoami)" != "root" ]; then
+  sudo chown -R $USERNAME:$USERNAME "$APP_DIR/.streamlit"
+else
+  chown -R $USERNAME:$USERNAME "$APP_DIR/.streamlit"
+fi
+
 # Cek status firewall
 if command -v ufw &>/dev/null && ufw status | grep -q "active"; then
   echo -e "\nMembuka port $PORT di firewall UFW..."
@@ -130,6 +153,16 @@ fi
 # Ambil alamat IP server
 IP_ADDRESS=$(hostname -I | awk '{print $1}')
 
+# Verifikasi apakah aplikasi berjalan dengan baik
+echo "Menunggu aplikasi mulai..."
+sleep 5
+curl -s -m 3 http://localhost:$PORT > /dev/null
+if [ $? -eq 0 ]; then
+  echo "Aplikasi berhasil diakses secara lokal."
+else
+  echo "PERINGATAN: Tidak dapat terhubung ke aplikasi secara lokal. Ini mungkin membutuhkan waktu lebih lama untuk mulai."
+fi
+
 echo -e "\n=== Instalasi Selesai! ==="
 echo "Daily Report Generator telah diinstal dan dijalankan sebagai service."
 echo -e "\nAnda dapat mengakses aplikasi di browser dengan alamat:"
@@ -138,4 +171,9 @@ echo -e "\nUntuk melihat status service:"
 echo "sudo systemctl status daily-report"
 echo -e "\nUntuk melihat log service:"
 echo "sudo journalctl -u daily-report -f"
+
+echo -e "\nJika aplikasi tidak dapat diakses:"
+echo "1. Pastikan port $PORT tidak diblokir oleh security group cloud provider"
+echo "2. Jalankan 'bash check_connection.sh' untuk mendiagnosis masalah"
+echo "3. Jalankan 'bash streamlit_config.sh' untuk mengonfigurasi ulang aplikasi"
 echo -e "\nInstalasi selesai!"
