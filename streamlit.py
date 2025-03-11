@@ -12,28 +12,29 @@ import subprocess
 import tempfile
 import socket
 
-# Tambahkan informasi diagnostik
+# Tambahkan informasi diagnostik dan status server
 try:
     hostname = socket.gethostname()
     ip_address = socket.gethostbyname(hostname)
-    st.sidebar.success(f"Server berjalan di: {hostname}")
-    st.sidebar.info(f"IP Address: {ip_address}")
-    st.sidebar.info(f"Port: {os.environ.get('STREAMLIT_SERVER_PORT', '8501')}")
+    
+    # Tambahkan sidebar dengan informasi server
+    st.sidebar.title("Informasi Server")
+    st.sidebar.success(f"Server: {hostname}")
+    st.sidebar.info(f"IP: {ip_address}")
+    
+    # Cek Nginx status
+    nginx_status = "Aktif" if subprocess.run(["systemctl", "is-active", "nginx"], 
+                                           capture_output=True, text=True).stdout.strip() == "active" else "Tidak Aktif"
+    st.sidebar.info(f"Nginx: {nginx_status}")
+    
+    # Cek template dokumen
+    template_path = "Weekly Daily Report Wildan Dzaky Ramadhani.docx"
+    if os.path.exists(template_path):
+        st.sidebar.success(f"✓ Template dokumen ditemukan")
+    else:
+        st.sidebar.error(f"✗ Template dokumen tidak ditemukan: {template_path}")
 except Exception as e:
-    st.sidebar.warning(f"Tidak dapat menampilkan informasi jaringan: {str(e)}")
-
-# Menampilkan path direktori untuk debugging
-st.sidebar.subheader("Informasi Sistem")
-st.sidebar.text(f"Direktori kerja: {os.getcwd()}")
-
-# Cek keberadaan template
-template_path = "Weekly Daily Report Wildan Dzaky Ramadhani.docx"
-if os.path.exists(template_path):
-    st.sidebar.success(f"Template ditemukan: {template_path}")
-else:
-    st.sidebar.error(f"Template tidak ditemukan: {template_path}")
-    st.sidebar.text("Daftar file di direktori:")
-    st.sidebar.text(str(os.listdir('.')))
+    pass  # Abaikan error diagnostik karena tidak krusial untuk aplikasi
 
 # Set page title
 st.set_page_config(page_title="Daily Report Generator", layout="wide")
@@ -171,8 +172,8 @@ def generate_report():
     filter_date = st.date_input("Pilih tanggal untuk laporan:", sekarang)
     filter_tanggal = filter_date.strftime("%Y-%m-%d")
     
-    # Tampilkan informasi koneksi Google Sheets
-    st.info(f"Data akan diambil dari Google Sheets ID: 1wJlAUerJDxpaBRxMOLxOmcSzG5LdwUz4K8HJ3uc1v0s")
+    # Tampilkan informasi Google Sheets yang digunakan
+    st.info("Data akan diambil dari Google Sheets. Pastikan Anda terhubung ke internet.")
     
     if st.button("Generate Report"):
         with st.spinner('Generating report...'):
@@ -290,18 +291,7 @@ def generate_report():
                 st.success(f'Report berhasil dibuat! Klik link di atas untuk mengunduh.')
 
 if __name__ == "__main__":
-    # Tambahkan deteksi mode debug
-    debug_mode = os.environ.get('STREAMLIT_DEBUG_MODE', 'false').lower() == 'true'
-    if debug_mode:
-        st.warning("Aplikasi berjalan dalam mode DEBUG")
-    
-    try:
-        generate_report()
-    except Exception as e:
-        st.error(f"Error: {str(e)}")
-        st.error("Silakan cek log untuk informasi lebih lanjut")
-        import traceback
-        st.code(traceback.format_exc())
+    generate_report()
 
 # -------------------------------------------------------------------------------------------
 # PANDUAN INSTALASI DAN MENJALANKAN APLIKASI DI LINUX UBUNTU
