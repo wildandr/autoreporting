@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, send_file, redirect, url_for
+from flask import Flask, render_template, request, send_file, Response
 from docx import Document
 from datetime import datetime
 from docx.oxml.ns import qn
@@ -8,8 +8,9 @@ import requests
 import io
 import base64
 import os
-import subprocess
+from werkzeug.utils import secure_filename
 import tempfile
+from docx2pdf import convert
 
 app = Flask(__name__)
 
@@ -67,61 +68,20 @@ bulan = {
     'September': 'September', 'October': 'Oktober', 'November': 'November', 'December': 'Desember'
 }
 
-# Fungsi untuk mengubah dokumen Word menjadi PDF menggunakan LibreOffice
-def convert_docx_to_pdf(docx_file):
-    try:
-        # Simpan dokumen ke file sementara
-        with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as temp_docx:
-            docx_file.save(temp_docx.name)
-            temp_docx_path = temp_docx.name
-        
-        # Nama file PDF sementara
-        temp_pdf_path = temp_docx_path.replace('.docx', '.pdf')
-        
-        # Konversi dengan LibreOffice
-        subprocess.run([
-            'libreoffice', '--headless', '--convert-to', 'pdf', 
-            '--outdir', os.path.dirname(temp_pdf_path), temp_docx_path
-        ], check=True, timeout=30)
-        
-        # Baca file PDF yang dihasilkan
-        with open(temp_pdf_path, 'rb') as pdf_file:
-            pdf_data = pdf_file.read()
-        
-        # Hapus file sementara
-        os.unlink(temp_docx_path)
-        os.unlink(temp_pdf_path)
-        
-        return pdf_data
-    except Exception as e:
-        print(f"Konversi PDF gagal: {str(e)}")
-        
-        # Pastikan file sementara dihapus
-        if 'temp_docx_path' in locals() and os.path.exists(temp_docx_path):
-            try:
-                os.unlink(temp_docx_path)
-            except:
-                pass
-        if 'temp_pdf_path' in locals() and os.path.exists(temp_pdf_path):
-            try:
-                os.unlink(temp_pdf_path)
-            except:
-                pass
-                
-        return None
-
-# Fungsi untuk generate report
-def generate_report_data(filter_date):
-    # Ambil tanggal saat ini
-    sekarang = datetime.now()
+def generate_docx_report(filter_date):
+    # Ambil tanggal dari parameter
+    sekarang = filter_date if filter_date else datetime.now()
     nama_hari = hari[sekarang.strftime("%A")]
     nama_bulan = bulan[sekarang.strftime("%B")]
     tanggal = sekarang.strftime("%d")
     tahun = sekarang.strftime("%Y")
     waktu_laporan = f"{nama_hari}, {tanggal} {nama_bulan} {tahun}"
     
-    # Format tanggal filter
-    filter_tanggal = filter_date.strftime("%Y-%m-%d")
+    # Format untuk filter
+    filter_tanggal = sekarang.strftime("%Y-%m-%d")
+    
+    # Nama file untuk download
+    file_name = f"{tanggal} {nama_bulan} {tahun}_Daily Report Wildan Dzaky Ramadhani.docx"
     
     # URL ekspor Google Sheets untuk file Excel
     file_id = "1wJlAUerJDxpaBRxMOLxOmcSzG5LdwUz4K8HJ3uc1v0s"
@@ -130,19 +90,18 @@ def generate_report_data(filter_date):
     # Unduh file Excel langsung dari Google Sheets
     try:
         response = requests.get(export_url)
-        if response.status_code == 200:
-            excel_data = io.BytesIO(response.content)
-            df = pd.read_excel(excel_data, sheet_name="New Format")
-        else:
-            return None, "Gagal mengunduh file dari Google Sheets"
+        if response.status_code != 200:
+            return {"error": f"Gagal mengunduh file: status code {response.status_code}"}, None
+        excel_data = io.BytesIO(response.content)
+        df = pd.read_excel(excel_data, sheet_name="New Format")
     except Exception as e:
-        return None, f"Error: {str(e)}"
+        return {"error": f"Gagal mengunduh file: {str(e)}"}, None
 
     # Filter data berdasarkan tanggal
-    df_filtered = df[df['Tanggal'] == filter_tanggal].fillna('')
+    df_filtered = df[df['Tanggal'] == filter_tanggal].fillna('')  # Ganti NaN dengan string kosong
 
     if df_filtered.empty:
-        return None, f"Tidak ada data untuk tanggal {filter_tanggal}"
+        return {"error": f"Tidak ada data untuk tanggal {filter_tanggal}"}, None
 
     # Konversi data filtered ke format yang sesuai untuk tabel
     data_baru = [
@@ -163,8 +122,8 @@ def generate_report_data(filter_date):
     # Cek apakah template dokumen ada
     template_path = "Weekly Daily Report Wildan Dzaky Ramadhani.docx"
     if not os.path.exists(template_path):
-        return None, f"Template file '{template_path}' tidak ditemukan."
-        
+        return {"error": f"Template file '{template_path}' tidak ditemukan."}, None
+            
     # Baca dokumen yang sudah ada
     doc = Document(template_path)
 
@@ -181,18 +140,19 @@ def generate_report_data(filter_date):
     
     for para in paragraphs_to_remove:
         doc.element.body.remove(para._element)
-        
+            
     # PENDEKATAN BARU: Kita tidak menghapus tabel lama, tapi menggantinya dengan data baru
     if not doc.tables:
-        return None, "Tidak dapat menemukan tabel di template dokumen."
-        
+        return {"error": "Tidak dapat menemukan tabel di template dokumen."}, None
+            
     table = doc.tables[0]  # Gunakan tabel yang ada
     
     # Pertahankan baris header, hapus semua baris data (baris ke-2 dan seterusnya)
+    # Ini mempertahankan semua format dan style
     while len(table.rows) > 1:
         tr = table.rows[1]._tr
         table._tbl.remove(tr)
-        
+            
     # Tambahkan data baru ke tabel yang ada
     for no, pekerjaan, batas_waktu, status, selesai_pada in data_baru:
         row_cells = table.add_row().cells
@@ -208,69 +168,79 @@ def generate_report_data(filter_date):
 
     # Tambahkan Keterangan setelah tabel
     doc.add_paragraph(f"{keterangan}")
-    
-    # Nama file
-    file_name = f"{tanggal} {nama_bulan} {tahun}_Daily Report Wildan Dzaky Ramadhani.docx"
-    
-    return doc, file_name
 
-@app.route('/')
+    # Simpan ke BytesIO
+    docx_io = io.BytesIO()
+    doc.save(docx_io)
+    docx_io.seek(0)
+    
+    return {"success": True, "file_name": file_name}, docx_io
+
+@app.route('/', methods=['GET', 'POST'])
 def index():
-    # Get today's date in format YYYY-MM-DD for default value in form
-    today = datetime.now().strftime('%Y-%m-%d')
-    return render_template('index.html', today=today)
-
-@app.route('/generate', methods=['POST'])
-def generate_report():
-    try:
-        # Get selected date from form
-        date_str = request.form.get('report_date', '')
-        create_pdf = request.form.get('create_pdf') == 'on'
+    if request.method == 'POST':
+        filter_date_str = request.form.get('filter_date')
+        format_type = request.form.get('format_type', 'docx')  # Get the chosen format
         
-        # Parse date
-        filter_date = datetime.strptime(date_str, '%Y-%m-%d')
+        # Parse date string to datetime object
+        try:
+            filter_date = datetime.strptime(filter_date_str, "%Y-%m-%d")
+        except:
+            filter_date = datetime.now()
         
-        # Generate report
-        doc, result = generate_report_data(filter_date)
+        # Generate the DOCX report first
+        result, docx_io = generate_docx_report(filter_date)
         
-        if doc is None:
-            # If error occurred
-            return render_template('error.html', error=result)
+        if 'error' in result:
+            return render_template('index.html', error=result['error'], date=datetime.now().strftime("%Y-%m-%d"))
         
-        # Create temporary file
-        temp_docx = tempfile.NamedTemporaryFile(delete=False, suffix='.docx')
-        temp_docx_path = temp_docx.name
-        doc.save(temp_docx_path)
+        # Generate file name
+        nama_hari = hari[filter_date.strftime("%A")]
+        nama_bulan = bulan[filter_date.strftime("%B")]
+        tanggal = filter_date.strftime("%d")
+        tahun = filter_date.strftime("%Y")
+        base_filename = f"{tanggal} {nama_bulan} {tahun}_Daily Report Wildan Dzaky Ramadhani"
         
-        if create_pdf:
-            # Convert to PDF
-            pdf_data = convert_docx_to_pdf(doc)
-            if pdf_data:
-                # Save PDF to temp file
-                pdf_file_name = result.replace('.docx', '.pdf')
-                temp_pdf = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
-                temp_pdf_path = temp_pdf.name
-                with open(temp_pdf_path, 'wb') as f:
-                    f.write(pdf_data)
+        # Return according to format requested
+        if format_type == 'docx':
+            # Send the DOCX file directly
+            return send_file(
+                docx_io, 
+                mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                as_attachment=True,
+                download_name=f"{base_filename}.docx"
+            )
+        elif format_type == 'pdf':
+            # Convert to PDF and send
+            with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as temp_docx:
+                temp_docx.write(docx_io.getvalue())
+                temp_docx_path = temp_docx.name
+            
+            # Output PDF path
+            temp_pdf_path = temp_docx_path.replace('.docx', '.pdf')
+            
+            try:
+                # Convert DOCX to PDF
+                convert(temp_docx_path, temp_pdf_path)
                 
-                # Send PDF file
+                # Send the PDF file
                 return send_file(
-                    temp_pdf_path, 
+                    temp_pdf_path,
+                    mimetype='application/pdf',
                     as_attachment=True,
-                    download_name=pdf_file_name,
-                    mimetype='application/pdf'
+                    download_name=f"{base_filename}.pdf"
                 )
-                
-        # Send DOCX file
-        return send_file(
-            temp_docx_path, 
-            as_attachment=True,
-            download_name=result,
-            mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-        )
-        
-    except Exception as e:
-        return render_template('error.html', error=f"Error generating report: {str(e)}")
+            except Exception as e:
+                return render_template('index.html', error=f"Error converting to PDF: {str(e)}", date=datetime.now().strftime("%Y-%m-%d"))
+            finally:
+                # Clean up temporary files
+                if os.path.exists(temp_docx_path):
+                    os.unlink(temp_docx_path)
+                if os.path.exists(temp_pdf_path):
+                    os.unlink(temp_pdf_path)
+    
+    # GET request or initial page load
+    return render_template('index.html', date=datetime.now().strftime("%Y-%m-%d"))
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080, debug=True)
+    app.run(debug=True, host='0.0.0.0', port=5000)

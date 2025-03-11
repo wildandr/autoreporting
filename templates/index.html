@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Daily Report Generator</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Daily Report Generator - Wildan Dzaky Ramadhani</h1>
+        
+        {% if error %}
+        <div class="alert alert-error">
+            {{ error }}
+        </div>
+        {% endif %}
+
+        <form method="POST" action="/">
+            <div class="form-group">
+                <label for="filter_date">Pilih tanggal untuk laporan:</label>
+                <input type="date" id="filter_date" name="filter_date" value="{{ date }}" required>
+            </div>
+            
+            <div class="form-group">
+                <label>Format output:</label>
+                <div class="radio-group">
+                    <label>
+                        <input type="radio" name="format_type" value="docx" checked> 
+                        DOCX
+                    </label>
+                    <label>
+                        <input type="radio" name="format_type" value="pdf"> 
+                        PDF
+                    </label>
+                </div>
+            </div>
+
+            <button type="submit" class="btn">Generate Report</button>
+        </form>
+    </div>
+</body>
+</html>
