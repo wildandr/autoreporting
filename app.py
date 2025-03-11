@@ -10,7 +10,7 @@ import base64
 import os
 from werkzeug.utils import secure_filename
 import tempfile
-from docx2pdf import convert
+import subprocess
 
 app = Flask(__name__)
 
@@ -211,7 +211,7 @@ def index():
                 download_name=f"{base_filename}.docx"
             )
         elif format_type == 'pdf':
-            # Convert to PDF and send
+            # Convert to PDF using LibreOffice
             with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as temp_docx:
                 temp_docx.write(docx_io.getvalue())
                 temp_docx_path = temp_docx.name
@@ -220,12 +220,21 @@ def index():
             temp_pdf_path = temp_docx_path.replace('.docx', '.pdf')
             
             try:
-                # Convert DOCX to PDF
-                convert(temp_docx_path, temp_pdf_path)
+                # Use LibreOffice for conversion (headless mode)
+                subprocess.run([
+                    'libreoffice', '--headless', '--convert-to', 'pdf',
+                    '--outdir', os.path.dirname(temp_pdf_path),
+                    temp_docx_path
+                ], check=True)
+                
+                pdf_output_path = os.path.join(
+                    os.path.dirname(temp_docx_path),
+                    os.path.basename(temp_docx_path).replace('.docx', '.pdf')
+                )
                 
                 # Send the PDF file
                 return send_file(
-                    temp_pdf_path,
+                    pdf_output_path,
                     mimetype='application/pdf',
                     as_attachment=True,
                     download_name=f"{base_filename}.pdf"
@@ -236,7 +245,7 @@ def index():
                 # Clean up temporary files
                 if os.path.exists(temp_docx_path):
                     os.unlink(temp_docx_path)
-                if os.path.exists(temp_pdf_path):
+                if os.path.exists(temp_pdf_path) and os.path.isfile(temp_pdf_path):
                     os.unlink(temp_pdf_path)
     
     # GET request or initial page load
