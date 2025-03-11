@@ -252,4 +252,7 @@ def index():
     return render_template('index.html', date=datetime.now().strftime("%Y-%m-%d"))
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # Change these settings to make Flask accessible externally
+    # host='0.0.0.0' allows connections from any IP address
+    # Set port to match the port you're trying to access (8502)
+    app.run(debug=False, host='0.0.0.0', port=8502)
