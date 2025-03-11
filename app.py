@@ -20,7 +20,8 @@ logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(sys.stdout)
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('app.log')
     ]
 )
 logger = logging.getLogger(__name__)
@@ -74,18 +75,6 @@ if not os.path.exists('templates/index.html'):
         </body>
         </html>
         ''')
-
-# Fungsi untuk log dengan try-except
-def safe_operation(operation_name, func, *args, **kwargs):
-    try:
-        logger.info(f"Starting {operation_name}")
-        result = func(*args, **kwargs)
-        logger.info(f"Completed {operation_name}")
-        return result
-    except Exception as e:
-        logger.error(f"Error in {operation_name}: {str(e)}")
-        logger.error(traceback.format_exc())
-        raise
 
 # Fungsi untuk menyalin pemformatan warna sel
 def copy_cell_formatting(src_cell, dest_cell):
@@ -313,6 +302,131 @@ def generate_docx_report(filter_date):
     
     return {"success": True, "file_name": file_name}, docx_io
 
+def convert_to_pdf(docx_content, base_filename):
+    """
+    Convert DOCX content to PDF with improved error handling
+    """
+    logger.info("Starting PDF conversion")
+    
+    # Create temporary files
+    with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as temp_docx:
+        temp_docx.write(docx_content)
+        temp_docx_path = temp_docx.name
+    
+    logger.info(f"Created temporary DOCX file: {temp_docx_path}")
+    
+    # Output PDF path
+    output_dir = os.path.dirname(temp_docx_path)
+    output_filename = os.path.basename(temp_docx_path).replace('.docx', '.pdf')
+    temp_pdf_path = os.path.join(output_dir, output_filename)
+    
+    logger.info(f"Target PDF path: {temp_pdf_path}")
+    
+    try:
+        # Set environment variables for LibreOffice
+        env = os.environ.copy()
+        if 'HOME' not in env:
+            # LibreOffice may need HOME set
+            env['HOME'] = '/root'  
+        
+        # Try using absolute path to LibreOffice
+        libreoffice_paths = [
+            'libreoffice',
+            '/usr/bin/libreoffice',
+            '/usr/local/bin/libreoffice'
+        ]
+        
+        success = False
+        error_messages = []
+        
+        for libreoffice_path in libreoffice_paths:
+            try:
+                logger.info(f"Attempting conversion with: {libreoffice_path}")
+                
+                cmd = [
+                    libreoffice_path, 
+                    '--headless', 
+                    '--convert-to', 
+                    'pdf', 
+                    '--outdir', 
+                    output_dir,
+                    temp_docx_path
+                ]
+                
+                # Run with extended timeout and capture output
+                process = subprocess.run(
+                    cmd,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=120  # 2 minutes timeout
+                )
+                
+                # Log the command output even if successful
+                logger.info(f"Command output: {process.stdout}")
+                if process.stderr:
+                    logger.info(f"Command stderr: {process.stderr}")
+                
+                # Check if the PDF was actually created
+                if os.path.exists(temp_pdf_path):
+                    logger.info(f"PDF conversion successful with: {libreoffice_path}")
+                    success = True
+                    break
+                else:
+                    error_msg = f"PDF file not created despite process exit code 0 with {libreoffice_path}"
+                    logger.warning(error_msg)
+                    error_messages.append(error_msg)
+                    
+            except subprocess.TimeoutExpired as e:
+                error_msg = f"Conversion timed out with {libreoffice_path}: {str(e)}"
+                logger.error(error_msg)
+                error_messages.append(error_msg)
+                continue
+                
+            except subprocess.CalledProcessError as e:
+                error_msg = f"Conversion failed with {libreoffice_path}: Exit code {e.returncode}"
+                if e.stdout:
+                    error_msg += f"\nSTDOUT: {e.stdout}"
+                if e.stderr:
+                    error_msg += f"\nSTDERR: {e.stderr}"
+                logger.error(error_msg)
+                error_messages.append(error_msg)
+                continue
+                
+            except Exception as e:
+                error_msg = f"Unexpected error with {libreoffice_path}: {str(e)}"
+                logger.error(error_msg)
+                logger.error(traceback.format_exc())
+                error_messages.append(error_msg)
+                continue
+        
+        if not success:
+            # All conversion attempts failed
+            error_detail = "\n".join(error_messages)
+            raise Exception(f"All PDF conversion attempts failed: {error_detail}")
+        
+        # Read the PDF content
+        with open(temp_pdf_path, 'rb') as f:
+            pdf_content = io.BytesIO(f.read())
+            pdf_content.seek(0)
+        
+        return pdf_content
+        
+    except Exception as e:
+        logger.error(f"PDF conversion failed: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise
+    finally:
+        # Clean up temporary files
+        logger.info("Cleaning up temporary files")
+        try:
+            if os.path.exists(temp_docx_path):
+                os.unlink(temp_docx_path)
+            if os.path.exists(temp_pdf_path):
+                os.unlink(temp_pdf_path)
+        except Exception as e:
+            logger.warning(f"Error cleaning up temporary files: {str(e)}")
+
 @app.route('/status')
 def status():
     """Simple status endpoint to check if app is running"""
@@ -320,8 +434,48 @@ def status():
         "status": "running",
         "template_exists": os.path.exists("Weekly Daily Report Wildan Dzaky Ramadhani.docx"),
         "templates_dir_exists": os.path.exists("templates"),
-        "index_html_exists": os.path.exists("templates/index.html")
+        "index_html_exists": os.path.exists("templates/index.html"),
+        "libreoffice_found": check_libreoffice_availability()
     })
+
+def check_libreoffice_availability():
+    """Check if LibreOffice is available and working"""
+    libreoffice_paths = [
+        'libreoffice',
+        '/usr/bin/libreoffice',
+        '/usr/local/bin/libreoffice'
+    ]
+    
+    for path in libreoffice_paths:
+        try:
+            result = subprocess.run([path, '--version'], 
+                                   capture_output=True, 
+                                   text=True, 
+                                   timeout=10)
+            if result.returncode == 0:
+                return {"available": True, "path": path, "version": result.stdout.strip()}
+        except:
+            pass
+    
+    return {"available": False}
+
+@app.route('/debug')
+def debug():
+    """Endpoint to get debug information"""
+    import platform
+    import sys
+    
+    debug_info = {
+        "python_version": sys.version,
+        "platform": platform.platform(),
+        "working_directory": os.getcwd(),
+        "files_in_directory": os.listdir(),
+        "libreoffice_status": check_libreoffice_availability(),
+        "environment_variables": {k: v for k, v in os.environ.items() 
+                                 if not k.lower().startswith(('pass', 'secret', 'key', 'token'))}
+    }
+    
+    return jsonify(debug_info)
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
@@ -341,7 +495,7 @@ def index():
                 filter_date = datetime.now()
             
             # Generate the DOCX report first
-            result, docx_io = safe_operation("generating report", generate_docx_report, filter_date)
+            result, docx_io = generate_docx_report(filter_date)
             
             if 'error' in result:
                 return render_template('index.html', error=result['error'], date=datetime.now().strftime("%Y-%m-%d"))
@@ -365,64 +519,22 @@ def index():
                     download_name=f"{base_filename}.docx"
                 )
             elif format_type == 'pdf':
-                # Check if LibreOffice is available
                 try:
-                    subprocess.run(['libreoffice', '--version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-                except (subprocess.CalledProcessError, FileNotFoundError) as e:
-                    logger.error(f"LibreOffice not available: {str(e)}")
-                    return render_template('index.html', 
-                                           error="PDF conversion requires LibreOffice which is not available on this server.",
-                                           date=datetime.now().strftime("%Y-%m-%d"))
-                
-                # Convert to PDF using LibreOffice
-                logger.info("Converting DOCX to PDF")
-                with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as temp_docx:
-                    temp_docx.write(docx_io.getvalue())
-                    temp_docx_path = temp_docx.name
-                
-                # Output PDF path
-                temp_pdf_path = temp_docx_path.replace('.docx', '.pdf')
-                
-                try:
-                    # Use LibreOffice for conversion (headless mode)
-                    logger.info(f"Running LibreOffice conversion: {temp_docx_path} -> {temp_pdf_path}")
-                    subprocess.run([
-                        'libreoffice', '--headless', '--convert-to', 'pdf',
-                        '--outdir', os.path.dirname(temp_pdf_path),
-                        temp_docx_path
-                    ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                    
-                    pdf_output_path = os.path.join(
-                        os.path.dirname(temp_docx_path),
-                        os.path.basename(temp_docx_path).replace('.docx', '.pdf')
-                    )
-                    
-                    if not os.path.exists(pdf_output_path):
-                        logger.error(f"PDF file not created at expected path: {pdf_output_path}")
-                        return render_template('index.html',
-                                              error="PDF file could not be created.",
-                                              date=datetime.now().strftime("%Y-%m-%d"))
-                    
-                    logger.info(f"PDF created successfully at: {pdf_output_path}")
+                    # Use the improved PDF conversion function
+                    pdf_io = convert_to_pdf(docx_io.getvalue(), base_filename)
                     
                     # Send the PDF file
                     return send_file(
-                        pdf_output_path,
+                        pdf_io,
                         mimetype='application/pdf',
                         as_attachment=True,
                         download_name=f"{base_filename}.pdf"
                     )
                 except Exception as e:
-                    logger.error(f"Error converting to PDF: {str(e)}")
-                    logger.error(traceback.format_exc())
-                    return render_template('index.html', error=f"Error converting to PDF: {str(e)}", date=datetime.now().strftime("%Y-%m-%d"))
-                finally:
-                    # Clean up temporary files
-                    logger.info("Cleaning up temporary files")
-                    if os.path.exists(temp_docx_path):
-                        os.unlink(temp_docx_path)
-                    if os.path.exists(temp_pdf_path) and os.path.isfile(temp_pdf_path):
-                        os.unlink(temp_pdf_path)
+                    logger.error(f"Error in PDF conversion: {str(e)}")
+                    return render_template('index.html', 
+                                          error=f"Error converting to PDF. Please try DOCX format instead. Technical details: {str(e)}",
+                                          date=datetime.now().strftime("%Y-%m-%d"))
         
         # GET request or initial page load
         logger.info("Handling GET request")
@@ -433,29 +545,16 @@ def index():
         logger.error(traceback.format_exc())
         return jsonify({"error": str(e), "traceback": traceback.format_exc()})
 
-@app.route('/debug')
-def debug():
-    """Endpoint to get debug information"""
-    import platform
-    import sys
-    
-    debug_info = {
-        "python_version": sys.version,
-        "platform": platform.platform(),
-        "working_directory": os.getcwd(),
-        "files_in_directory": os.listdir(),
-        "environment_variables": {k: v for k, v in os.environ.items() if not k.lower().startswith(('pass', 'secret', 'key', 'token'))},
-        "modules": [m.__name__ for m in sys.modules.values() if hasattr(m, '__name__')]
-    }
-    
-    return jsonify(debug_info)
-
 if __name__ == '__main__':
     print("Starting Flask application...")
     print(f"Current directory: {os.getcwd()}")
     print(f"Python version: {sys.version}")
     print(f"Template exists: {os.path.exists('Weekly Daily Report Wildan Dzaky Ramadhani.docx')}")
     print(f"Templates directory exists: {os.path.exists('templates')}")
+    
+    # Check LibreOffice availability
+    libreoffice_status = check_libreoffice_availability()
+    print(f"LibreOffice status: {libreoffice_status}")
     
     # Create a test docx if template doesn't exist (for demo purposes)
     if not os.path.exists("Weekly Daily Report Wildan Dzaky Ramadhani.docx"):
