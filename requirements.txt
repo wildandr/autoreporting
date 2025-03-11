@@ -5,3 +5,4 @@ pandas
 requests==2.31.0
 openpyxl
 gunicorn==21.2.0
+docx2pdf
