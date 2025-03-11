@@ -8,6 +8,9 @@ import requests
 import io
 import base64
 import os
+import tempfile
+# Tambahkan docx2pdf untuk konversi PDF
+from docx2pdf import convert
 
 # Set page title
 st.set_page_config(page_title="Daily Report Generator", layout="wide")
@@ -78,6 +81,51 @@ def create_download_link(docx_file, filename):
     b64 = base64.b64encode(doc_io.read()).decode()
     return f'<a href="data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,{b64}" download="{filename}">Download {filename}</a>'
 
+# Fungsi untuk mengkonversi docx ke pdf menggunakan docx2pdf
+def convert_to_pdf(docx_file, filename):
+    try:
+        st.info("Mengkonversi dokumen ke PDF...")
+        
+        # Simpan dokumen ke file sementara
+        with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as temp_docx:
+            docx_file.save(temp_docx.name)
+            temp_docx_path = temp_docx.name
+        
+        # Nama file PDF sementara
+        temp_pdf_path = temp_docx_path.replace('.docx', '.pdf')
+        
+        # Konversi dengan docx2pdf
+        convert(temp_docx_path, temp_pdf_path)
+        
+        # Baca file PDF yang dihasilkan
+        with open(temp_pdf_path, 'rb') as pdf_file:
+            pdf_data = pdf_file.read()
+        
+        # Hapus file sementara
+        os.unlink(temp_docx_path)
+        os.unlink(temp_pdf_path)
+        
+        # Buat download link untuk PDF
+        b64 = base64.b64encode(pdf_data).decode()
+        return f'<a href="data:application/pdf;base64,{b64}" download="{filename.replace(".docx", ".pdf")}">Download {filename.replace(".docx", ".pdf")}</a>'
+    
+    except Exception as e:
+        st.error(f"Konversi PDF gagal: {str(e)}")
+        
+        # Pastikan file sementara dihapus
+        if 'temp_docx_path' in locals() and os.path.exists(temp_docx_path):
+            try:
+                os.unlink(temp_docx_path)
+            except:
+                pass
+        if 'temp_pdf_path' in locals() and os.path.exists(temp_pdf_path):
+            try:
+                os.unlink(temp_pdf_path)
+            except:
+                pass
+        
+        return None
+
 # Main function untuk streamlit
 def generate_report():
     # Ambil tanggal saat ini
@@ -94,6 +142,9 @@ def generate_report():
     # Tanggal filter (untuk default gunakan tanggal saat ini)
     filter_date = st.date_input("Pilih tanggal untuk laporan:", sekarang)
     filter_tanggal = filter_date.strftime("%Y-%m-%d")
+    
+    # Tambahkan opsi untuk menghasilkan PDF
+    create_pdf = st.checkbox("Buat juga versi PDF")
     
     if st.button("Generate Report"):
         with st.spinner('Generating report...'):
@@ -194,9 +245,19 @@ def generate_report():
             # Buat download link
             download_html = create_download_link(doc, file_name)
             st.markdown(download_html, unsafe_allow_html=True)
-            st.success(f'Report berhasil dibuat! Klik link di atas untuk mengunduh.')
-
-
+            
+            # Jika opsi PDF dipilih, konversi ke PDF
+            if create_pdf:
+                with st.spinner("Mengkonversi dokumen ke PDF..."):
+                    pdf_link = convert_to_pdf(doc, file_name)
+                    if pdf_link:
+                        st.markdown(pdf_link, unsafe_allow_html=True)
+                        st.success(f'Report berhasil dibuat dalam format DOCX dan PDF! Klik link di atas untuk mengunduh.')
+                    else:
+                        st.warning("Konversi PDF gagal. Hanya file DOCX yang tersedia.")
+                        st.success(f'Report berhasil dibuat dalam format DOCX! Klik link di atas untuk mengunduh.')
+            else:
+                st.success(f'Report berhasil dibuat! Klik link di atas untuk mengunduh.')
 
 if __name__ == "__main__":
     generate_report()

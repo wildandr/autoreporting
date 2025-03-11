@@ -1,6 +1,13 @@
 # Daily Report Generator
 
-Aplikasi Generator Laporan Harian berbasis web menggunakan Streamlit.
+Aplikasi web untuk membuat laporan harian berdasarkan data dari Google Sheets.
+
+## Fitur
+
+- Mengambil data dari Google Sheets
+- Menghasilkan laporan dalam format DOCX
+- Mengkonversi laporan ke format PDF
+- Antarmuka web yang mudah digunakan
 
 ## Persyaratan Sistem
 
@@ -118,3 +125,52 @@ sudo ufw allow 8501/tcp
 2. Jika konversi PDF gagal, pastikan:
    - LibreOffice terinstal dengan benar
    - Template dokumen Word berada di direktori yang sama dengan aplikasi
+
+## Konversi PDF
+
+Aplikasi ini mendukung konversi dokumen Word (DOCX) ke PDF menggunakan library `docx2pdf`. Library ini memerlukan Java Runtime Environment (JRE) untuk berfungsi dengan baik.
+
+### Prasyarat untuk Konversi PDF
+
+1. Java Runtime Environment (JRE) terinstal di sistem
+2. Library Python `docx2pdf` terinstal
+
+### Instalasi Dependensi
+
+Untuk menginstal semua dependensi yang diperlukan, jalankan:
+
+```bash
+sudo bash install_docx2pdf.sh
+```
+
+### Troubleshooting Konversi PDF
+
+Jika konversi PDF gagal, coba langkah-langkah berikut:
+
+1. Pastikan Java terinstal:
+   ```bash
+   java -version
+   ```
+
+2. Instal JRE jika belum ada:
+   ```bash
+   sudo apt-get install -y default-jre
+   ```
+
+3. Verifikasi bahwa docx2pdf dapat menemukan Java:
+   ```bash
+   python3 -c "import os; print('JAVA_HOME:', os.environ.get('JAVA_HOME'))"
+   ```
+
+4. Setel JAVA_HOME secara manual jika diperlukan:
+   ```bash
+   export JAVA_HOME=$(readlink -f /usr/bin/java | sed "s:/bin/java::")
+   ```
+
+## Penggunaan
+
+1. Buka aplikasi di browser
+2. Pilih tanggal untuk laporan
+3. Centang opsi "Buat juga versi PDF" jika ingin mengunduh PDF
+4. Klik "Generate Report"
+5. Klik link yang muncul untuk mengunduh file DOCX dan PDF
